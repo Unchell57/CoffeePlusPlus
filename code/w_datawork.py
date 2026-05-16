@@ -1,11 +1,10 @@
 import pandas as pd
 import matplotlib.pyplot as plt
-from adjustText import adjust_text
 
 PATH: str = 'C:\\Users\\Вадимъ\\Documents\\GitHub\\CoffeePlusPlus\\'
 
 class ProductAnalyzer:
-    def __init__(self, df, product_name, unit, path=''):
+    def __init__(self, df, product_name, unit, column='', path=''):
         """
         df: DataFrame с колонками [Товар, Поставщик, Цена, Количество, Единица, Цена за кг/л]
         product_name: название товара (например, "Молоко")
@@ -16,13 +15,14 @@ class ProductAnalyzer:
         self.product_name = product_name
         self.unit = unit
         self.path = path
+        self.column = column
+
         self.filtered_df = None
         self.aggregated_df = None
         
-    def _swap_columns(self):
-        """Меняет местами Товар и Поставщик, если Товар не равен product_name"""
-        mask = self.df['Товар'] != self.product_name
-        self.df.loc[mask, ['Товар', 'Поставщик']] = self.df.loc[mask, ['Поставщик', 'Товар']].values
+    def _swap_columns(self, column: str):
+        """Меняет местами колонки Товар и Column. Так мы сможем сразу строить графики для сравнения не только рейтингпроизводитель, но и рейтинг+что-то_ещё"""
+        self.df[column], self.df['Поставщик'] = self.df['Поставщик'], self.df[column]
     
     def _aggregate_by_supplier(self):
         """Группирует по поставщику, оставляет запись с минимальной ценой и добавляет рейтинг"""
@@ -74,8 +74,8 @@ class ProductAnalyzer:
                        fontsize=9, fontweight='bold', xytext=offset, textcoords='offset points')
         
         ax.set_xlabel(f'Цена за {self.unit} (руб.)', fontsize=10)
-        ax.set_ylabel('Рейтинг (средний по товарам поставщика)', fontsize=10)
-        ax.set_title(f'{self.product_name}: анализ поставщиков (цена vs рейтинг)', fontsize=12)
+        ax.set_ylabel('Рейтинг (средний по товарам группы)', fontsize=10)
+        ax.set_title(f'{self.product_name}: анализ по столбцу {self.column} (цена vs рейтинг)', fontsize=12)
         
         table_data = [[f"{i+1}. {row['Поставщик']}"] for i, (_, row) in enumerate(df.iterrows())]
         table = ax.table(cellText=table_data, loc='right', bbox=[1.15, 0, 0.3, 1])
@@ -87,7 +87,7 @@ class ProductAnalyzer:
         if self.path:
             plt.savefig(f"{self.path}{self.product_name}Scatter.png", dpi=150, bbox_inches='tight')
 
-        plt.show()
+        # plt.show()
     
     def _plot_score_bars(self):
         """Столбчатая диаграмма со скором"""
@@ -102,7 +102,7 @@ class ProductAnalyzer:
         ax.set_yticklabels(df['Поставщик'], fontsize=9)
         ax.set_xlabel('Скор', fontsize=10)
         ax.set_ylabel('Поставщик', fontsize=10)
-        ax.set_title(f'{self.product_name}: рейтинг поставщиков', fontsize=12)
+        ax.set_title(f'{self.product_name}: рейтинг {self.column}', fontsize=12)
         ax.invert_yaxis()
         
         # Добавляем значения на бары
@@ -114,17 +114,35 @@ class ProductAnalyzer:
         if self.path:
             plt.savefig(f"{self.path}{self.product_name}Score.png", dpi=150, bbox_inches='tight')
 
-        plt.show()
+        # plt.show()
     
-    def run(self, rating_weight=0.7):
+    def run(self, rating_weight: float = 0.7):
         """Запускает полный анализ"""
-        self._swap_columns()
+        if self.column:
+            self._swap_columns(self.column)
         self._aggregate_by_supplier()
         self._calculate_score(rating_weight)
         self._plot_scatter()
         self._plot_score_bars()
         return self.aggregated_df
 
-milk: pd.DataFrame = pd.read_csv(PATH + "input\\milk.csv")
-milk_analyzer = ProductAnalyzer(milk, 'Молоко', 'л', PATH + "output\\")
-result_milk = milk_analyzer.run(rating_weight=0.7)
+CSVs: dict[str, str] = {
+    'milk': 'л',
+    'drinks': 'л',
+    'coffee': 'кг',
+    'zoomer_milk': 'л',
+    'sport_food': 'кг',
+}
+
+analyzers = []
+
+for csv, measure in CSVs.items():
+    df = pd.DataFrame = pd.read_csv(PATH + f"input\\{csv}.csv")
+    analyzer = ProductAnalyzer(df, csv, measure, '', PATH + "output\\Producer")
+    analyzers.append(analyzer)
+    result = analyzer.run(rating_weight=0.7)
+
+for csv in CSVs:
+    df = pd.DataFrame = pd.read_csv(PATH + f"input\\{csv}.csv")
+    analyzer = ProductAnalyzer(df, csv, measure, 'Товар', PATH + "output\\Type")
+    result = analyzer.run(rating_weight=0.7)
