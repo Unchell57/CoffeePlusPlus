@@ -11,7 +11,9 @@ import pandas as pd
 PATH: str = 'C:\\Users\\Вадимъ\\Documents\\GitHub\\CoffeePlusPlus\\'
 
 class ParserPlusPlus(ABC):
-
+    """
+    Абстрактный класс для парсеров. В будущем он поможет нам парсить другие сайты
+    """
     def __init__(self):
         self.last_page: int = 0
         self.urls: list[str] = []
@@ -36,6 +38,9 @@ class ParserPlusPlus(ABC):
     async def parse_html(self, html: str) -> pd.DataFrame: pass
 
     async def parse(self):
+        """
+        Базовая функция для парсинга: создаёт задачи на скачивания html'ек, после парсит нужные вещи на каждой странице и сохраняет
+        """
         async with aiohttp.ClientSession() as sess:
             tasks = [self.async_request(sess, url) for url in self.urls]
             htmls: list[str] = await asyncio.gather(*tasks)
@@ -60,12 +65,16 @@ class ParserPlusPlus(ABC):
             return ""
     
     def to_csv(self, file_name: str):
+        """ Сохраняем напаршенно в csv """
         self.df.to_csv(PATH + f"input/{file_name}.csv", index=False, encoding='utf-8-sig')
 
 class MetroParser(ParserPlusPlus):
-
+    """ Парсер для магазина METRO """
     def __init__(self, path: str, eshop_order: bool = True, in_stock: bool = True) -> None:
-
+        """
+        path — путь к странице с нужными товарами относительно https://online.metro-cc.ru/category/
+        eshop_order, in_stock — флаги того, хотим ли мы 1) искать товары доступные для онлайн заказа, 2) в целом в наличии
+        """
         super().__init__()
 
         self.path = path
@@ -83,7 +92,9 @@ class MetroParser(ParserPlusPlus):
         return f'https://online.metro-cc.ru/category/{self.path}?in_stock={int(self.in_stock)}&page={num}&eshop_order={int(self.eshop_order)}'
 
     async def parse_html(self, html: str) -> pd.DataFrame:
-        
+        """
+        Сердце парсера — по html для каждой страницы в пагинации создаёт ДатаФрейм с товарами на ней
+        """
         soup: BeautifulSoup = BeautifulSoup( html, features="html.parser" )
 
         goods_divs = soup.find_all('div', class_="product-card__content")
@@ -108,32 +119,42 @@ class MetroParser(ParserPlusPlus):
             rating = good_div.find('span', class_="product-card-rating__rating")
             rating = float( rating.get_text().strip() ) if rating else None
 
-            type: str = title.split()[0]
-            producer: str = title.split()[1] # да, грубо, но нам важно найти самый выгодные товары, а там по первому слову можно будет их обнаружить легко
-
-            quantity_real: None | float = None
-            quantity_int: int | None
-            quantity_type: str | None
-            quantity_int, quantity_type = MetroParser.parse_quantity(title)
+            type, producer, quantity_int, quantity_type = self.parse_title(title)
 
             if quantity_int:
 
                 if quantity_type == 'мл' or quantity_type == 'г':
-                    quantity_real = ( price_clear / quantity_int) * 1000
+                    price_real = ( price_clear / quantity_int) * 1000
+
                 else:
-                    quantity_real = price_clear / quantity_int if quantity_int else None
+                    price_real = price_clear / quantity_int if quantity_int else None
 
-                quantity_real = round( quantity_real, 2)
+                price_real = round( quantity_real, 2)
 
-            
-
-            goods.loc[len(goods)] = [type, producer, price_clear, quantity_int, quantity_type, quantity_real, rating]
+            goods.loc[len(goods)] = [type, producer, price_clear, quantity_int, quantity_type, price_real, rating]
         
         return goods
 
     @staticmethod
+    def parse_title(title: str) -> tuple[str, str, int, str]:
+        """
+        По наименованию товара на странице парсим его тип, производителя и единицу измерения. (Привет, любимое ДЗ4!)
+        Эта версия хорошо подходит для молока и (неожиданно) колбасы, но для других желанных товаров нередко ошибается.
+        Для исправления этого под каждый особый товар будут созданы свои парсеры с отличным parse_title
+        """
+        type: str = title.split()[0]
+        producer: str = title.split()[1] # да, грубо, но нам важно найти самый выгодные товары, а там по первому слову можно будет их обнаружить легко
+
+        quantity_int, quantity_type = MetroParser.parse_quantity(title)
+
+        return (type, producer, quantity_int, quantity_type)
+
+    @staticmethod
     def parse_quantity(text: str) -> tuple[int | None, str | None]:
-        # Паттерн: целое число (или десятичное) + возможно пробел + единица измерения
+        """
+        Парсим единицу измерения и её значение
+        Паттерн: целое число (или десятичное) + возможно пробел + единица измерения
+        """
         pattern = r'(\d+(?:\.\d+)?)\s*([а-я]+)$'
         match = re.search(pattern, text.strip())
         
@@ -144,10 +165,25 @@ class MetroParser(ParserPlusPlus):
         else:
             print( f"Не удалось распарсить строку: {text}" )
             return None, None
-    
-if __name__ == "__main__":
-    milk = MetroParser("molochnye-prodkuty-syry-i-yayca/moloko")
-    print( asyncio.run( milk.parse() ) )
 
-    kolbasa = MetroParser("myasnye-delikatesy/kolbasy-vetchina")
-    print( asyncio.run( kolbasa.parse() ) )
+class MilkParser(MetroParser): pass
+
+class ZoomerMilkParser(MetroParser):
+    @staticmethod
+    def parse_title(title: str) -> tuple[str, str, int, str]:
+        TODO
+
+class SaladParser(MetroParser):
+    @staticmethod
+    def parse_title(title: str) -> tuple[str, str, int, str]:
+        TODO
+
+class DrinksParser(MetroParser):
+    @staticmethod
+    def parse_title(title: str) -> tuple[str, str, int, str]:
+        TODO
+
+class SportParser(MetroParser):
+    @staticmethod
+    def parse_title(title: str) -> tuple[str, str, int, str]:
+        TODO
