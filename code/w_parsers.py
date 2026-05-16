@@ -15,7 +15,6 @@ class ParserPlusPlus(ABC):
     def __init__(self):
         self.last_page: int = 0
         self.urls: list[str] = []
-        self.file_name: str = "good"
     
     @abstractmethod
     def generate_url(self, num: int) -> str: pass
@@ -46,7 +45,7 @@ class ParserPlusPlus(ABC):
 
             df = pd.concat(dfs, ignore_index=True)
 
-        df.to_csv(PATH + f"output/{self.file_name}.csv", index=False, encoding='utf-8-sig')
+        self.df = df
         return df
     
     @staticmethod
@@ -59,15 +58,17 @@ class ParserPlusPlus(ABC):
           else:
             print(f"Ошибка {response.status} для {url}")
             return ""
+    
+    def to_csv(self, file_name: str):
+        self.df.to_csv(PATH + f"input/{file_name}.csv", index=False, encoding='utf-8-sig')
 
 class MetroParser(ParserPlusPlus):
 
-    def __init__(self, path: str, file_name: str = "METRO", eshop_order: bool = True, in_stock: bool = True) -> None:
+    def __init__(self, path: str, eshop_order: bool = True, in_stock: bool = True) -> None:
 
         super().__init__()
 
         self.path = path
-        self.file_name = file_name
         self.eshop_order: bool = eshop_order
         self.in_stock: bool = in_stock
 
@@ -93,14 +94,19 @@ class MetroParser(ParserPlusPlus):
             'Цена': pd.Series(dtype='float64'),
             'Количество': pd.Series(dtype='int64'),
             'Единица': pd.Series(dtype='object'),
-            'Цена за кг/л': pd.Series(dtype='float64')
+            'Цена за кг/л': pd.Series(dtype='float64'),
+            'Рейтинг': pd.Series(dtype='float64')
         })
 
         for good_div in goods_divs:
 
             title: str = good_div.find('span', class_="product-card-name__text").get_text()
+
             price_str: str = good_div.find('span', class_="product-price__sum-rubles").get_text()
             price_clear: float = float( re.sub(r'[^\d.]', '', price_str) )
+            
+            rating = good_div.find('span', class_="product-card-rating__rating")
+            rating = float( rating.get_text().strip() ) if rating else None
 
             type: str = title.split()[0]
             producer: str = title.split()[1] # да, грубо, но нам важно найти самый выгодные товары, а там по первому слову можно будет их обнаружить легко
@@ -121,7 +127,7 @@ class MetroParser(ParserPlusPlus):
 
             
 
-            goods.loc[len(goods)] = [type, producer, price_clear, quantity_int, quantity_type, quantity_real]
+            goods.loc[len(goods)] = [type, producer, price_clear, quantity_int, quantity_type, quantity_real, rating]
         
         return goods
 
@@ -140,8 +146,8 @@ class MetroParser(ParserPlusPlus):
             return None, None
     
 if __name__ == "__main__":
-    milk = MetroParser("molochnye-prodkuty-syry-i-yayca/moloko", "milk")
+    milk = MetroParser("molochnye-prodkuty-syry-i-yayca/moloko")
     print( asyncio.run( milk.parse() ) )
 
-    kolbasa = MetroParser("myasnye-delikatesy/kolbasy-vetchina", "kolbasa")
+    kolbasa = MetroParser("myasnye-delikatesy/kolbasy-vetchina")
     print( asyncio.run( kolbasa.parse() ) )
