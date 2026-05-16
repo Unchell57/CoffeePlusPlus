@@ -75,7 +75,7 @@ class MetroParser(ParserPlusPlus):
         first_page: BeautifulSoup = BeautifulSoup( requests.get(self.generate_url(1)).text, features="html.parser")
 
         links = first_page.find_all('a', class_='v-pagination__item')
-        self.last_page: int = int( links[-1].get_text() ) # предпоследний элемент в METRO — всегда ссылка на последнюю страницу
+        self.last_page: int = int( links[-1].get_text() ) if links else 1 # предпоследний элемент в METRO — всегда ссылка на последнюю страницу
 
         self.generate_urls()
 
