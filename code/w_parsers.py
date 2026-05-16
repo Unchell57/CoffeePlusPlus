@@ -69,6 +69,10 @@ class ParserPlusPlus(ABC):
         self.df.to_csv(PATH + f"input/{file_name}.csv", index=False, encoding='utf-8-sig')
 
 class MetroParser(ParserPlusPlus):
+
+    brand_token: str = "Бренд"
+    type_token: str = "Вид"
+
     """ Парсер для магазина METRO """
     def __init__(self, path: str, eshop_order: bool = True, in_stock: bool = True) -> None:
         """
@@ -85,6 +89,10 @@ class MetroParser(ParserPlusPlus):
 
         links = first_page.find_all('a', class_='v-pagination__item')
         self.last_page: int = int( links[-1].get_text() ) if links else 1 # предпоследний элемент в METRO — всегда ссылка на последнюю страницу
+
+        # парсим значения бренда и типа на основе данных в поиске на сайте (вау!)
+        self.brands: list[str] = self.parse_filter(first_page, self.brand_token)
+        self.types: list[str] = self.parse_filter(first_page, self.type_token)
 
         self.generate_urls()
 
@@ -111,7 +119,7 @@ class MetroParser(ParserPlusPlus):
 
         for good_div in goods_divs:
 
-            title: str = good_div.find('span', class_="product-card-name__text").get_text()
+            title: str = good_div.find('span', class_="product-card-name__text").get_text().lower()
 
             price_str: str = good_div.find('span', class_="product-price__sum-rubles").get_text()
             price_clear: float = float( re.sub(r'[^\d.]', '', price_str) )
@@ -119,7 +127,7 @@ class MetroParser(ParserPlusPlus):
             rating = good_div.find('span', class_="product-card-rating__rating")
             rating = float( rating.get_text().strip() ) if rating else None
 
-            type, producer, quantity_int, quantity_type = self.parse_title(title)
+            type, producer, quantity_int, quantity_type = self.parse_title(title, self.types, self.brands)
 
             if quantity_int:
 
@@ -129,25 +137,51 @@ class MetroParser(ParserPlusPlus):
                 else:
                     price_real = price_clear / quantity_int if quantity_int else None
 
-                price_real = round( quantity_real, 2)
+                price_real = round( price_real, 2)
 
             goods.loc[len(goods)] = [type, producer, price_clear, quantity_int, quantity_type, price_real, rating]
         
         return goods
 
     @staticmethod
-    def parse_title(title: str) -> tuple[str, str, int, str]:
+    def parse_filter(soup: BeautifulSoup, filter: str) -> list[str]:
+        
+        main_div = soup.find('div', attrs={'data-filter-group': filter})
+        spans = main_div.find_all('span', class_="catalog-checkbox__text")
+
+        types = [span.get_text().strip().lower() for span in spans]
+
+        return types
+
+    @classmethod
+    def parse_title(cls, title: str, types: list[str], brands: list[str]) -> tuple[str, str, int, str]:
         """
         По наименованию товара на странице парсим его тип, производителя и единицу измерения. (Привет, любимое ДЗ4!)
-        Эта версия хорошо подходит для молока и (неожиданно) колбасы, но для других желанных товаров нередко ошибается.
-        Для исправления этого под каждый особый товар будут созданы свои парсеры с отличным parse_title
-        """
-        type: str = title.split()[0]
-        producer: str = title.split()[1] # да, грубо, но нам важно найти самый выгодные товары, а там по первому слову можно будет их обнаружить легко
+        Изначальная версия хорошо подходила для молока и (неожиданно) колбасы, но для других желанных товаров нередко ошибалась.
+        Для исправления этого под каждый товар были созданы свои парсеры с отличным parse_title
+        """    
 
-        quantity_int, quantity_type = MetroParser.parse_quantity(title)
+        print(cls)
+        print(brands)
+        print(types)
+        producer: str = ""
+        for brand in brands:
 
-        return (type, producer, quantity_int, quantity_type)
+            if brand in title:
+
+                producer = brand
+                break
+
+        name: str = ""
+        for type in types:
+
+            if type in title:
+                name = type
+                break
+
+        quantity_int, quantity_type = cls.parse_quantity(title)
+
+        return name, producer, quantity_int, quantity_type
 
     @staticmethod
     def parse_quantity(text: str) -> tuple[int | None, str | None]:
@@ -166,24 +200,66 @@ class MetroParser(ParserPlusPlus):
             print( f"Не удалось распарсить строку: {text}" )
             return None, None
 
-class MilkParser(MetroParser): pass
+# _______________ ЧАСТНЫЕ ПАРСЕРЫ ___________________
+
+class MilkParser(MetroParser):
+    def __init__(self, path: str, eshop_order: bool = True, in_stock: bool = True) -> None:
+        super().__init__(path, eshop_order, in_stock)
+
+        self.types = ["молоко"]
 
 class ZoomerMilkParser(MetroParser):
-    @staticmethod
-    def parse_title(title: str) -> tuple[str, str, int, str]:
-        TODO
+    @classmethod
+    def parse_title(cls, title: str, types: list[str], brands: list[str]) -> tuple[str, str, int, str]:
+        
+        cleared_title = title.replace('соев', 'соя').replace('овся', 'овес')
 
-class SaladParser(MetroParser):
-    @staticmethod
-    def parse_title(title: str) -> tuple[str, str, int, str]:
-        TODO
+        return super().parse_title(cleared_title, types, brands)
+
+    def __init__(self, path: str, eshop_order: bool = True, in_stock: bool = True) -> None:
+        super().__init__(path, eshop_order, in_stock)
+
+        self.types += ["банан", "кокос", "миндаль", "овес", "орех", "рис", "соя", "фундук"]
 
 class DrinksParser(MetroParser):
-    @staticmethod
-    def parse_title(title: str) -> tuple[str, str, int, str]:
-        TODO
+    type_token = "Вкус"
+
+    @classmethod
+    def parse_title(cls, title: str, types: list[str], brands: list[str]) -> tuple[str, str, int, str]:
+        
+        cleared_title = title.replace('яблоч', 'яблоко').replace('бруснич', 'брусника').replace('яблоч', 'яблоко').replace('вишн', 'вишня').replace('яблоч', 'яблоко').replace("клюквен", "клюква").replace("ягодн", "ягода")
+
+        return super().parse_title(cleared_title, types, brands)
 
 class SportParser(MetroParser):
-    @staticmethod
-    def parse_title(title: str) -> tuple[str, str, int, str]:
-        TODO
+    type_token = "Тип"
+    
+    def __init__(self, path: str, eshop_order: bool = True, in_stock: bool = True) -> None:
+        super().__init__(path, eshop_order, in_stock)
+
+        self.brands.append('fitness shock')
+
+class CoffeeParser(MetroParser):
+    type_token = "Тип"
+
+# _____ ФАБРИКА ПАРСЕРОВ !!! ____
+
+class ParserFabric():
+    _parsers = {
+        "molochnye-prodkuty-syry-i-yayca/moloko": MilkParser,
+        "rastitelnoe-moloko": ZoomerMilkParser,
+        "soki-morsy-nektary": DrinksParser,
+        "sportivnoe-pitanie": SportParser,
+        "kofe-v-zernakh": CoffeeParser,
+    }
+
+    @classmethod
+    def create(cls, path: str) -> MetroParser:
+
+        for nick, parser in cls._parsers.items():
+
+            if nick in path:
+                return parser(path)
+        
+        return MetroParser(path) # стадартный возвращаем, если товар неособенный
+        
