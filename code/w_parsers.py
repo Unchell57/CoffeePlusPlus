@@ -8,6 +8,7 @@ from bs4 import BeautifulSoup
 import re
 
 from playwright.async_api import async_playwright
+from playwright.async_api import TimeoutError as PlaywrightTimeoutError
 
 import pandas as pd
 
@@ -172,7 +173,9 @@ class MetroParser(ParserPlusPlus):
 
     @staticmethod
     def _parse_filter(soup: BeautifulSoup, filter: str) -> list[str]:
-        
+        """
+        Парсит элементы фильтрации (бренд, тип) товара из супа
+        """
         main_div = soup.find('div', attrs={'data-filter-group': filter})
         spans = main_div.find_all('span', class_="catalog-checkbox__text")
 
@@ -304,18 +307,23 @@ class DynamicParser(ParserPlusPlus):
         return df
     
     @abstractmethod
-    async def _prepare_html(browser, url): pass
+    async def _prepare_html(browser, url) -> str:
+      """
+      Делает все нужные действия на странице, после чего сохраняет html для дальнейшего парсинга
+      """
+      pass
 
     @staticmethod
     async def block_resources(route):
-
+        """
+        Удаляет излишества, чем ускоряет загрузку страницы
+        """
         resource_type = route.request.resource_type
 
         if resource_type in [
             "image",
             "media",
             "font",
-            "stylesheet"
         ]:
             await route.abort()
 
@@ -346,7 +354,7 @@ class TastyCoffeeParser(DynamicParser):
     def _generate_url(self, num: int) -> str:
         return f'https://shop.tastycoffee.ru/{self._path}?page={num}'
     
-    async def _prepare_html(self, browser, url):
+    async def _prepare_html(self, browser, url) -> str:
         page = await browser.new_page()
         await page.route("**/*", self.block_resources)
 
@@ -356,7 +364,7 @@ class TastyCoffeeParser(DynamicParser):
         )
         
         try:
-            await page.wait_for_selector("div[class='tc-weight']", timeout=60000)
+            await page.wait_for_selector("div[class='tc-weight']", timeout=30000)
 
             elements = page.locator("div[class='tc-weight']")
 
@@ -370,15 +378,13 @@ class TastyCoffeeParser(DynamicParser):
                 await asyncio.sleep(
                     random.uniform(1, 2)
                 )
-            
-            return await page.content()
 
-        except TimeoutError:
+        except PlaywrightTimeoutError:
             print(f"Не нашли тыкалки на {url}")
-            
-            return ''
+
         finally:
-            await page.close()
+            html = await page.content()
+            return html
     
     async def _parse_html(self, html: str) -> pd.DataFrame:
         """
@@ -386,7 +392,8 @@ class TastyCoffeeParser(DynamicParser):
         """
         soup: BeautifulSoup = BeautifulSoup( html, features="html.parser" )
 
-        goods_divs = soup.find_all('div', class_="div.tc-tile")
+        goods_divs = soup.find_all('div', class_="tc-tile")
+        print(f"Найдено карточек: {len(goods_divs)}")
 
         goods: pd.DataFrame = pd.DataFrame({
             'Название': pd.Series(dtype='object'),
@@ -406,14 +413,21 @@ class TastyCoffeeParser(DynamicParser):
         for good_div in goods_divs:
 
             title: str = good_div.select_one(".tc-tile__title a").get_text().strip()
-            processing: str = good_div.select_one(".tc-tooltip__btn div").get_text().strip()
-            type: str = good_div.select_one(".tc-tile__top:first-child").get_text().strip()
+
+            processing: str = good_div.select_one(".tc-tooltip__btn div")
+            processing = processing.get_text().strip() if processing else None
+
+            type_: str = good_div.select_one(".tc-tile__top div").get_text().strip()
 
             description: str = good_div.select_one("p[itemprop='description']").get_text(" ")
             description = re.sub(r"\s+", " ", description).strip()
 
-            density: float = float( good_div.select_one(".tc-tile__scale:first-child .tc-progress__object")['width'].strip() )
-            acidity: float = float( good_div.select_one(".tc-tile__scale:last-child .tc-progress__object")['width'].strip() )
+            scales = good_div.select(".tc-tile__scale .tc-progress__object")
+            #density = good_div.select_one(".tc-tile__scale:first-child .tc-progress__object")
+            density = float( int(scales[0]['width'].strip()[:-1]) / 100 ) if scales else None
+
+            # acidity = good_div.select_one(".tc-tile__scale:last-child .tc-progress__object")
+            acidity = float( int(scales[1]['width'].strip()[:-1]) / 100 ) if scales else None
 
             quantity: str = good_div.select_one("div[class='tc-weight active'] span").get_text().strip()
 
@@ -421,17 +435,19 @@ class TastyCoffeeParser(DynamicParser):
             quantity_type: str
             quantity_int, quantity_type = self.parse_quantity(quantity)
 
-            price: int = int( good_div.select_one(".tc-tile__bottom button span.text-nowrap").get_text().strip() )
+            price_str = good_div.select_one(".tc-tile__bottom button span.text-nowrap").get_text().strip().replace(" ", "")
+            price: int = int( price_str[:-1] )
+
             price_real: float = self.count_price(quantity_int, quantity_type, price)
             
             rating = good_div.select_one(".tc-tile-rating span")
             rating = float( rating.get_text().strip() ) if rating else None
 
-            reviews = good_div.select_one(".tc-tile-rating a span")
-            reviews = float( rating.get_text().strip() ) if rating else None
+            reviews = good_div.select_one('a[href*="#reviews"] span')
+            reviews = int( reviews.get_text().strip() ) if reviews else None
 
-            goods.loc[len(goods)] = [title, processing, type, description, density, acidity, quantity_int, quantity_type, price, price_real, rating, reviews]
-        
+            goods.loc[len(goods)] = [title, processing, type_, description, density, acidity, quantity_int, quantity_type, price, price_real, rating, reviews]
+
         return goods
 
 if __name__ == "__main__":
