@@ -15,37 +15,37 @@ class ParserPlusPlus(ABC):
     Абстрактный класс для парсеров. В будущем он поможет нам парсить другие сайты
     """
     def __init__(self):
-        self.last_page: int = 0
-        self.urls: list[str] = []
+        self._last_page: int = 0
+        self._urls: list[str] = []
     
     @abstractmethod
-    def generate_url(self, num: int) -> str: pass
+    def _generate_url(self, num: int) -> str: pass
 
-    def generate_urls(self) -> list[str]:
+    def _generate_urls(self) -> list[str]:
 
         urls: list[str] = []
 
-        for i in range(self.last_page):
+        for i in range(self._last_page):
 
-            url: str = self.generate_url(i + 1)
+            url: str = self._generate_url(i + 1)
             urls.append(url)
         
-        self.urls = urls
+        self._urls = urls
         
         return urls
     
     @abstractmethod
-    async def parse_html(self, html: str) -> pd.DataFrame: pass
+    async def _parse_html(self, html: str) -> pd.DataFrame: pass
 
     async def parse(self):
         """
         Базовая функция для парсинга: создаёт задачи на скачивания html'ек, после парсит нужные вещи на каждой странице и сохраняет
         """
         async with aiohttp.ClientSession() as sess:
-            tasks = [self.async_request(sess, url) for url in self.urls]
+            tasks = [self._async_request(sess, url) for url in self._urls]
             htmls: list[str] = await asyncio.gather(*tasks)
 
-            tasks = [self.parse_html(html) for html in htmls]
+            tasks = [self._parse_html(html) for html in htmls]
             dfs: list[pd.DataFrame] = await asyncio.gather(*tasks)
 
             df = pd.concat(dfs, ignore_index=True)
@@ -54,7 +54,7 @@ class ParserPlusPlus(ABC):
         return df
     
     @staticmethod
-    async def async_request(sess: aiohttp.ClientSession, url: str) -> str:
+    async def _async_request(sess: aiohttp.ClientSession, url: str) -> str:
         async with sess.get(url, timeout=aiohttp.ClientTimeout(total=10)) as response:
 
           if response.status == 200:
@@ -70,8 +70,8 @@ class ParserPlusPlus(ABC):
 
 class MetroParser(ParserPlusPlus):
 
-    brand_token: str = "Бренд"
-    type_token: str = "Вид"
+    _brand_token: str = "Бренд"
+    _type_token: str = "Вид"
 
     """ Парсер для магазина METRO """
     def __init__(self, path: str, eshop_order: bool = True, in_stock: bool = True) -> None:
@@ -81,25 +81,25 @@ class MetroParser(ParserPlusPlus):
         """
         super().__init__()
 
-        self.path = path
-        self.eshop_order: bool = eshop_order
-        self.in_stock: bool = in_stock
+        self._path = path
+        self._eshop_order: bool = eshop_order
+        self._in_stock: bool = in_stock
 
-        first_page: BeautifulSoup = BeautifulSoup( requests.get(self.generate_url(1)).text, features="html.parser")
+        first_page: BeautifulSoup = BeautifulSoup( requests.get(self._generate_url(1)).text, features="html.parser")
 
         links = first_page.find_all('a', class_='v-pagination__item')
-        self.last_page: int = int( links[-1].get_text() ) if links else 1 # предпоследний элемент в METRO — всегда ссылка на последнюю страницу
+        self._last_page: int = int( links[-1].get_text() ) if links else 1 # предпоследний элемент в METRO — всегда ссылка на последнюю страницу
 
         # парсим значения бренда и типа на основе данных в поиске на сайте (вау!)
-        self.brands: list[str] = self.parse_filter(first_page, self.brand_token)
-        self.types: list[str] = self.parse_filter(first_page, self.type_token)
+        self._brands: list[str] = self._parse_filter(first_page, self._brand_token)
+        self._types: list[str] = self._parse_filter(first_page, self._type_token)
 
-        self.generate_urls()
+        self._generate_urls()
 
-    def generate_url(self, num: int) -> str:
-        return f'https://online.metro-cc.ru/category/{self.path}?in_stock={int(self.in_stock)}&page={num}&eshop_order={int(self.eshop_order)}'
+    def _generate_url(self, num: int) -> str:
+        return f'https://online.metro-cc.ru/category/{self._path}?in_stock={int(self._in_stock)}&page={num}&eshop_order={int(self._eshop_order)}'
 
-    async def parse_html(self, html: str) -> pd.DataFrame:
+    async def _parse_html(self, html: str) -> pd.DataFrame:
         """
         Сердце парсера — по html для каждой страницы в пагинации создаёт ДатаФрейм с товарами на ней
         """
@@ -127,7 +127,7 @@ class MetroParser(ParserPlusPlus):
             rating = good_div.find('span', class_="product-card-rating__rating")
             rating = float( rating.get_text().strip() ) if rating else None
 
-            type, producer, quantity_int, quantity_type = self.parse_title(title, self.types, self.brands)
+            type, producer, quantity_int, quantity_type = self.parse_title(title, self._types, self._brands)
 
             if quantity_int:
 
@@ -144,7 +144,7 @@ class MetroParser(ParserPlusPlus):
         return goods
 
     @staticmethod
-    def parse_filter(soup: BeautifulSoup, filter: str) -> list[str]:
+    def _parse_filter(soup: BeautifulSoup, filter: str) -> list[str]:
         
         main_div = soup.find('div', attrs={'data-filter-group': filter})
         spans = main_div.find_all('span', class_="catalog-checkbox__text")
@@ -161,9 +161,6 @@ class MetroParser(ParserPlusPlus):
         Для исправления этого под каждый товар были созданы свои парсеры с отличным parse_title
         """    
 
-        print(cls)
-        print(brands)
-        print(types)
         producer: str = ""
         for brand in brands:
 
@@ -179,12 +176,12 @@ class MetroParser(ParserPlusPlus):
                 name = type
                 break
 
-        quantity_int, quantity_type = cls.parse_quantity(title)
+        quantity_int, quantity_type = cls._parse_quantity(title)
 
         return name, producer, quantity_int, quantity_type
 
     @staticmethod
-    def parse_quantity(text: str) -> tuple[int | None, str | None]:
+    def _parse_quantity(text: str) -> tuple[int | None, str | None]:
         """
         Парсим единицу измерения и её значение
         Паттерн: целое число (или десятичное) + возможно пробел + единица измерения
@@ -206,7 +203,7 @@ class MilkParser(MetroParser):
     def __init__(self, path: str, eshop_order: bool = True, in_stock: bool = True) -> None:
         super().__init__(path, eshop_order, in_stock)
 
-        self.types = ["молоко"]
+        self._types = ["молоко"]
 
 class ZoomerMilkParser(MetroParser):
     @classmethod
@@ -219,10 +216,10 @@ class ZoomerMilkParser(MetroParser):
     def __init__(self, path: str, eshop_order: bool = True, in_stock: bool = True) -> None:
         super().__init__(path, eshop_order, in_stock)
 
-        self.types += ["банан", "кокос", "миндаль", "овес", "орех", "рис", "соя", "фундук"]
+        self._types += ["банан", "кокос", "миндаль", "овес", "орех", "рис", "соя", "фундук"]
 
 class DrinksParser(MetroParser):
-    type_token = "Вкус"
+    _type_token = "Вкус"
 
     @classmethod
     def parse_title(cls, title: str, types: list[str], brands: list[str]) -> tuple[str, str, int, str]:
@@ -232,20 +229,20 @@ class DrinksParser(MetroParser):
         return super().parse_title(cleared_title, types, brands)
 
 class SportParser(MetroParser):
-    type_token = "Тип"
+    _type_token = "Тип"
     
     def __init__(self, path: str, eshop_order: bool = True, in_stock: bool = True) -> None:
         super().__init__(path, eshop_order, in_stock)
 
-        self.brands.append('fitness shock')
+        self._brands.append('fitness shock')
 
 class CoffeeParser(MetroParser):
-    type_token = "Тип"
+    _type_token = "Тип"
 
 # _____ ФАБРИКА ПАРСЕРОВ !!! ____
 
 class ParserFabric():
-    _parsers = {
+    _parsers: dict[str, object] = {
         "molochnye-prodkuty-syry-i-yayca/moloko": MilkParser,
         "rastitelnoe-moloko": ZoomerMilkParser,
         "soki-morsy-nektary": DrinksParser,

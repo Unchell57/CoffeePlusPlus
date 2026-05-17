@@ -4,10 +4,10 @@ from w_parsers import ParserFabric
 # создаём парсеры для всех интересных нам товаров, запускаем их и сохраняем полученные данные
 
 parsers_data: dict[str, str] = {
-    #"milk": "molochnye-prodkuty-syry-i-yayca/moloko",
-    #"zoomer_milk": "molochnye-prodkuty-syry-i-yayca/rastitelnye-produkty/rastitelnoe-moloko",
-    #"sport_food": "zdorovoe-pitanie/sportivnoe-pitanie",
-    #"drinks": "bezalkogolnye-napitki/soki-morsy-nektary",
+    "milk": "molochnye-prodkuty-syry-i-yayca/moloko",
+    "zoomer_milk": "molochnye-prodkuty-syry-i-yayca/rastitelnye-produkty/rastitelnoe-moloko",
+    "sport_food": "zdorovoe-pitanie/sportivnoe-pitanie",
+    "drinks": "bezalkogolnye-napitki/soki-morsy-nektary",
     "coffee": "chaj-kofe-kakao/kofe/kofe-v-zernakh",
 }
 
