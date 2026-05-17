@@ -1,10 +1,13 @@
 from abc import ABC, abstractmethod
+import random
 
 import requests
 import aiohttp
 import asyncio
 from bs4 import BeautifulSoup
 import re
+
+from playwright.async_api import async_playwright
 
 import pandas as pd
 
@@ -67,6 +70,38 @@ class ParserPlusPlus(ABC):
     def to_csv(self, file_name: str):
         """ Сохраняем напаршенно в csv """
         self.df.to_csv(PATH + f"input/{file_name}.csv", index=False, encoding='utf-8-sig')
+    
+    @staticmethod
+    def parse_quantity(text: str) -> tuple[int | None, str | None]:
+        """
+        Парсим единицу измерения и её значение
+        Паттерн: целое число (или десятичное) + возможно пробел + единица измерения
+        """
+        pattern = r'(\d+(?:\.\d+)?)\s*([а-я]+)$'
+        match = re.search(pattern, text.strip())
+        
+        if match:
+            quantity_int: int = int(float(match.group(1)))  # преобразуем в int
+            quantity_type: str = match.group(2)
+            return quantity_int, quantity_type
+        else:
+            print( f"Не удалось распарсить строку: {text}" )
+            return None, None
+    
+    @staticmethod
+    def count_price(quantity_int: int, quantity_type: str, price: int | float) -> float:
+        if quantity_int:
+
+            price_real = price / quantity_int
+
+            if quantity_type == 'мл' or quantity_type == 'г' or quantity_type == 'гр':
+                price_real *= 1000
+
+            return round( price_real, 2)
+
+        return None
+
+# __________________________ METRO _______________________________________
 
 class MetroParser(ParserPlusPlus):
 
@@ -129,15 +164,7 @@ class MetroParser(ParserPlusPlus):
 
             type, producer, quantity_int, quantity_type = self.parse_title(title, self._types, self._brands)
 
-            if quantity_int:
-
-                if quantity_type == 'мл' or quantity_type == 'г':
-                    price_real = ( price_clear / quantity_int) * 1000
-
-                else:
-                    price_real = price_clear / quantity_int if quantity_int else None
-
-                price_real = round( price_real, 2)
+            price_real = self.count_price(quantity_int, quantity_type, price_clear)
 
             goods.loc[len(goods)] = [type, producer, price_clear, quantity_int, quantity_type, price_real, rating]
         
@@ -176,28 +203,12 @@ class MetroParser(ParserPlusPlus):
                 name = type
                 break
 
-        quantity_int, quantity_type = cls._parse_quantity(title)
+        quantity_int, quantity_type = cls.parse_quantity(title)
 
         return name, producer, quantity_int, quantity_type
 
-    @staticmethod
-    def _parse_quantity(text: str) -> tuple[int | None, str | None]:
-        """
-        Парсим единицу измерения и её значение
-        Паттерн: целое число (или десятичное) + возможно пробел + единица измерения
-        """
-        pattern = r'(\d+(?:\.\d+)?)\s*([а-я]+)$'
-        match = re.search(pattern, text.strip())
-        
-        if match:
-            quantity_int: int = int(float(match.group(1)))  # преобразуем в int
-            quantity_type: str = match.group(2)
-            return quantity_int, quantity_type
-        else:
-            print( f"Не удалось распарсить строку: {text}" )
-            return None, None
 
-# _______________ ЧАСТНЫЕ ПАРСЕРЫ ___________________
+# ___________________________ ЧАСТНЫЕ ПАРСЕРЫ ______________________________
 
 class MilkParser(MetroParser):
     def __init__(self, path: str, eshop_order: bool = True, in_stock: bool = True) -> None:
@@ -259,4 +270,174 @@ class ParserFabric():
                 return parser(path)
         
         return MetroParser(path) # стадартный возвращаем, если товар неособенный
+
+# __________________________ ДИНАМИЧЕСКИЙ ПАРСИНГ (PLAYWRIGHT) _______________________________________
+
+class DynamicParser(ParserPlusPlus):
+    """
+    Абстрактный класс для динамического парсера
+    """
+    def __init__(self):
+        super().__init__()
+
+        self._headless = True
+
+    async def parse(self):
+        """
+        Базовая функция для динамического парсинга: создаёт задачи на на работу в браузере и сохраняет правильный html, после парсит нужные вещи на каждой странице и сохраняет
+        """
+        async with async_playwright() as p:
+
+            browser = await p.chromium.launch(headless = self._headless)
+
+            tasks = [self._prepare_html(browser, url) for url in self._urls]
+            htmls: list[str] = await asyncio.gather(*tasks)
+            
+            await browser.close()
+
+            tasks = [self._parse_html(html) for html in htmls]
+            dfs: list[pd.DataFrame] = await asyncio.gather(*tasks)
+
+            df = pd.concat(dfs, ignore_index=True)
+
+        self.df = df
+        return df
+    
+    @abstractmethod
+    async def _prepare_html(browser, url): pass
+
+    @staticmethod
+    async def block_resources(route):
+
+        resource_type = route.request.resource_type
+
+        if resource_type in [
+            "image",
+            "media",
+            "font",
+            "stylesheet"
+        ]:
+            await route.abort()
+
+        else:
+            await route.continue_()
+
+class TastyCoffeeParser(DynamicParser):
+    """
+    Парсер для сайта TastyCoffee
+    Используем Playwright, чтобы получить цены за 1кг зёрен (это дешевле)
+    """
+    def __init__(self, path: str, headless: bool = True) -> None:
+        """
+        path — путь к странице с нужными товарами относительно https://shop.tastycoffee.ru/
+        """
+        super().__init__()
+
+        self._path = path
+        self._headless = headless
+
+        first_page: BeautifulSoup = BeautifulSoup( requests.get(self._generate_url(1)).text, features="html.parser")
+
+        links = first_page.find_all('a', class_='pagination-btn')
+        self._last_page: int = int( links[-1].get_text() ) if links else 1 # последний элемент — ссылка на последнюю страницу
+
+        self._generate_urls()
+
+    def _generate_url(self, num: int) -> str:
+        return f'https://shop.tastycoffee.ru/{self._path}?page={num}'
+    
+    async def _prepare_html(self, browser, url):
+        page = await browser.new_page()
+        await page.route("**/*", self.block_resources)
+
+        await page.goto(
+            url,
+            timeout=240000
+        )
         
+        try:
+            await page.wait_for_selector("div[class='tc-weight']", timeout=60000)
+
+            elements = page.locator("div[class='tc-weight']")
+
+            count = await elements.count()
+            await asyncio.sleep(
+                random.uniform(2, 5)
+            )
+
+            for i in range(count):
+                await elements.nth(i).click()
+                await asyncio.sleep(
+                    random.uniform(1, 2)
+                )
+            
+            return await page.content()
+
+        except TimeoutError:
+            print(f"Не нашли тыкалки на {url}")
+            
+            return ''
+        finally:
+            await page.close()
+    
+    async def _parse_html(self, html: str) -> pd.DataFrame:
+        """
+        Сердце парсера — по html для каждой страницы в пагинации создаёт ДатаФрейм с товарами на ней
+        """
+        soup: BeautifulSoup = BeautifulSoup( html, features="html.parser" )
+
+        goods_divs = soup.find_all('div', class_="div.tc-tile")
+
+        goods: pd.DataFrame = pd.DataFrame({
+            'Название': pd.Series(dtype='object'),
+            'Способ обработки': pd.Series(dtype='object'),
+            'Тип': pd.Series(dtype='object'),
+            'Описание': pd.Series(dtype='object'),
+            'Плотность': pd.Series(dtype='float64'),
+            'Кислотность': pd.Series(dtype='float64'),
+            'Количество': pd.Series(dtype='int64'),
+            'Единица': pd.Series(dtype='object'),
+            'Цена': pd.Series(dtype='int64'),
+            'Цена за кг/шт': pd.Series(dtype='float64'),
+            'Рейтинг': pd.Series(dtype='float64'),
+            'Число отзывов': pd.Series(dtype='int64'),
+        })
+
+        for good_div in goods_divs:
+
+            title: str = good_div.select_one(".tc-tile__title a").get_text().strip()
+            processing: str = good_div.select_one(".tc-tooltip__btn div").get_text().strip()
+            type: str = good_div.select_one(".tc-tile__top:first-child").get_text().strip()
+
+            description: str = good_div.select_one("p[itemprop='description']").get_text(" ")
+            description = re.sub(r"\s+", " ", description).strip()
+
+            density: float = float( good_div.select_one(".tc-tile__scale:first-child .tc-progress__object")['width'].strip() )
+            acidity: float = float( good_div.select_one(".tc-tile__scale:last-child .tc-progress__object")['width'].strip() )
+
+            quantity: str = good_div.select_one("div[class='tc-weight active'] span").get_text().strip()
+
+            quantity_int: int
+            quantity_type: str
+            quantity_int, quantity_type = self.parse_quantity(quantity)
+
+            price: int = int( good_div.select_one(".tc-tile__bottom button span.text-nowrap").get_text().strip() )
+            price_real: float = self.count_price(quantity_int, quantity_type, price)
+            
+            rating = good_div.select_one(".tc-tile-rating span")
+            rating = float( rating.get_text().strip() ) if rating else None
+
+            reviews = good_div.select_one(".tc-tile-rating a span")
+            reviews = float( rating.get_text().strip() ) if rating else None
+
+            goods.loc[len(goods)] = [title, processing, type, description, density, acidity, quantity_int, quantity_type, price, price_real, rating, reviews]
+        
+        return goods
+
+if __name__ == "__main__":
+
+    parser = TastyCoffeeParser("coffee", False)
+    df = asyncio.run( parser.parse() )
+    parser.to_csv("TastyCoffee")
+
+    print(df)
