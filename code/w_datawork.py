@@ -27,7 +27,7 @@ class ProductAnalyzer:
     def _aggregate_by_supplier(self):
         """Группирует по поставщику, оставляет запись с минимальной ценой и добавляет рейтинг"""
         self.aggregated_df = self.df.loc[self.df.groupby('Поставщик')['Цена за кг/л'].idxmin()].copy()
-        self.aggregated_df['Рейтинг'] = self.df.groupby('Поставщик')['Рейтинг'].transform('mean').round(1)
+        self.aggregated_df['Рейтинг'] = self.df.groupby('Поставщик')['Рейтинг'].transform('mean').round(2)
         self.aggregated_df = self.aggregated_df.sort_values('Цена за кг/л').reset_index(drop=True)
     
     def _calculate_score(self, rating_weight=0.7):
