@@ -26,7 +26,6 @@ class ParserPlusPlus(ABC):
         urls: list[str] = []
 
         for i in range(self.last_page):
-
             url: str = self.generate_url(i + 1)
             urls.append(url)
         
@@ -166,15 +165,12 @@ class MetroParser(ParserPlusPlus):
         print(types)
         producer: str = ""
         for brand in brands:
-
             if brand in title:
-
                 producer = brand
                 break
 
         name: str = ""
         for type in types:
-
             if type in title:
                 name = type
                 break
@@ -211,7 +207,6 @@ class MilkParser(MetroParser):
 class ZoomerMilkParser(MetroParser):
     @classmethod
     def parse_title(cls, title: str, types: list[str], brands: list[str]) -> tuple[str, str, int, str]:
-        
         cleared_title = title.replace('соев', 'соя').replace('овся', 'овес')
 
         return super().parse_title(cleared_title, types, brands)
@@ -244,7 +239,7 @@ class CoffeeParser(MetroParser):
 
 # _____ ФАБРИКА ПАРСЕРОВ !!! ____
 
-class ParserFabric():
+class ParserFactory():
     _parsers = {
         "molochnye-prodkuty-syry-i-yayca/moloko": MilkParser,
         "rastitelnoe-moloko": ZoomerMilkParser,
@@ -255,7 +250,6 @@ class ParserFabric():
 
     @classmethod
     def create(cls, path: str) -> MetroParser:
-
         for nick, parser in cls._parsers.items():
 
             if nick in path:
