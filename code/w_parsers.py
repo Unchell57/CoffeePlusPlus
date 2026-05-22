@@ -29,8 +29,8 @@ class ParserPlusPlus(ABC):
 
         urls: list[str] = []
 
-        for i in range(self.last_page):
-            url: str = self.generate_url(i + 1)
+        for i in range(self._last_page):
+            url: str = self._generate_url(i + 1)
             urls.append(url)
         
         self._urls = urls
