@@ -1,4 +1,4 @@
-title,price,area,address,metro,metro_time,date,url,coords,towers_nearby
+title,price,area,address,metro,metro_time,date,url,cords,towers_nearby
 "ПСН, салон, офис, бьюти, студия 65.5 м² с трафиком в Москве",150000,65.5,"Ул. Михайлова, 31А",Плющево,6–10 мин.,11 февраля 22:05,https://www.avito.ru/moskva/kommercheskaya_nedvizhimost/psn_salon_ofis_byuti_studiya_65.5_m_s_trafikom_7852257776,"{'lat': 55.726013, 'lon': 37.775008}",11
 "Свободного назначения, 18 м² в Москве",50000,18.0,"Дмитровское ш., 100",Яхромская,до 5 мин.,26 июня 2015,https://www.avito.ru/moskva/kommercheskaya_nedvizhimost/svobodnogo_naznacheniya_18_m_596361375,"{'lat': 55.881721, 'lon': 37.545529}",18
 "Свободного назначения, 98 м² на высоком трафике в Москве",250000,98.0,"Ул. Артюхиной, 26А",Печатники,11–15 мин.,1 неделю назад,https://www.avito.ru/moskva/kommercheskaya_nedvizhimost/svobodnogo_naznacheniya_98_m_na_vysokom_trafike_8030252470,"{'lat': 55.694597, 'lon': 37.738255}",19
